@@ -1,6 +1,8 @@
 # Kubernetes Observability Platform
 
-Metrics, dashboards and alerting for a Kubernetes cluster using **Prometheus**, **Grafana** and **Alertmanager**, deployed with the `kube-prometheus-stack` Helm chart on a local **kind** cluster. Alerts are tested with `promtool` in CI.
+Metrics, dashboards and alerting for a Kubernetes cluster using **Prometheus**, **Grafana** and **Alertmanager**, deployed with the `kube-prometheus-stack` Helm chart on a local **kind** or **minikube** cluster. Alerts are tested with `promtool` in CI.
+
+![Grafana dashboard](docs/grafana-dashboard.jpg)
 
 ## Architecture
 
@@ -36,7 +38,7 @@ Makefile                    one-command workflows
 
 ## Prerequisites
 
-`docker`, `kind`, `kubectl`, `helm`. For linting: `promtool` and `yq` (v4, mikefarah).
+`docker`, `kind` or `minikube`, `kubectl`, `helm`. For linting: `promtool` and `yq` (v4, mikefarah).
 
 ## Quick start
 
@@ -51,6 +53,23 @@ make port-forward-alertmanager            # http://localhost:9093
 
 Open Grafana, then **Dashboards → Demo app - RED metrics**.
 
+### Without `make` (Windows PowerShell + minikube)
+
+```powershell
+minikube start --memory=4096 --cpus=2
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+kubectl create namespace monitoring
+kubectl -n monitoring create secret generic alertmanager-slack --from-literal=webhook-url="https://hooks.slack.com/services/REPLACE/ME/PLEASE"
+helm upgrade --install kps prometheus-community/kube-prometheus-stack --namespace monitoring -f helm/values.yaml --wait --timeout 20m
+kubectl apply -f demo-app/app.yaml
+kubectl apply -f demo-app/load-generator.yaml
+kubectl apply -f alerts/prometheus-rule.yaml
+kubectl apply -f dashboards/
+```
+
+Create the Slack secret **before** the chart install, otherwise Alertmanager stays in `Init`.
+
 ## Trigger an alert
 
 ```bash
@@ -59,6 +78,28 @@ make fix      # restore
 ```
 
 Watch it move through Pending → Firing in Prometheus (**Alerts**), then see the Slack message. For the error-rate alert, raise the error share: `kubectl -n demo set env deploy/load-generator ERROR_EVERY=3`.
+
+## Screenshots
+
+### Prometheus targets
+`demo-app`, Alertmanager and the other ServiceMonitors are all scraped and `UP`.
+
+![Prometheus targets](docs/prometheus-targets.jpg)
+
+### Grafana: RED metrics dashboard
+Request rate, error ratio, latency percentiles and per-pod CPU for the demo app.
+
+![Grafana dashboard](docs/grafana-dashboard.jpg)
+
+### Outage and recovery
+`demo-app` was scaled to zero (the gap in the graphs), then restored; new pods appear in Pod CPU.
+
+![Outage and recovery](docs/outage-and-recovery.jpg)
+
+### Alertmanager
+Alerts are grouped and routed: `DemoAppHighErrorRate` goes to the `slack` receiver and `Watchdog` goes to `null`.
+
+![Alertmanager](docs/alertmanager.jpg)
 
 ## Alerts
 
@@ -91,10 +132,18 @@ The same checks run in GitHub Actions on every push.
 - **Dashboards as code.** Grafana's sidecar loads any ConfigMap labelled `grafana_dashboard: "1"`.
 - The example app returns 404 on `/err`, so the error-rate alert counts 4xx as errors for demo purposes. Use 5xx only for real services.
 
+## Known issues on minikube
+
+- `KubeAggregatedAPIDown` fires for the metrics-server addon. It is harmless.
+- With the placeholder Slack URL, `AlertmanagerFailedToSendAlerts` fires. Use a real webhook to clear it.
+- Images from quay.io or Docker Hub can time out on slow networks (`ImagePullBackOff`). Pull them with `docker pull` and copy them in with `minikube image load <image>`, then delete the stuck pod.
+- cAdvisor exposes pod-level CPU series without a `container` label, so the Pod CPU panel filters on `container=""`.
+
 ## Cleanup
 
 ```bash
-make down
+make down          # kind
+minikube delete    # minikube
 ```
 
 ## Next steps
