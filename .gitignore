@@ -1,0 +1,3 @@
+alertmanager-slack.yaml
+tests/rules.yaml
+*.secret.yaml

@@ -1,0 +1,42 @@
+# Generates steady traffic plus a trickle of 404s (the example app's /err
+# endpoint) so the dashboards and error-rate alert have data to show.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-generator
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: load-generator
+  template:
+    metadata:
+      labels:
+        app: load-generator
+    spec:
+      containers:
+        - name: load
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              i=0
+              while true; do
+                wget -q -O- http://demo-app:8080/ >/dev/null
+                i=$((i+1))
+                if [ $((i % ${ERROR_EVERY:-10})) -eq 0 ]; then
+                  wget -q -O- http://demo-app:8080/err >/dev/null 2>&1
+                fi
+                sleep 0.2
+              done
+          env:
+            - name: ERROR_EVERY
+              value: "10"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi

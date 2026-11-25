@@ -1,0 +1,41 @@
+name: lint
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install promtool
+        run: |
+          VER=2.55.1
+          curl -sL https://github.com/prometheus/prometheus/releases/download/v${VER}/prometheus-${VER}.linux-amd64.tar.gz | tar xz
+          sudo mv prometheus-${VER}.linux-amd64/promtool /usr/local/bin/
+
+      - name: Extract rules
+        run: yq '.spec' alerts/prometheus-rule.yaml > tests/rules.yaml
+
+      - name: promtool check rules
+        run: promtool check rules tests/rules.yaml
+
+      - name: promtool unit tests
+        run: cd tests && promtool test rules alerts_test.yaml
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: yamllint
+        run: |
+          pip install yamllint
+          yamllint -d "{extends: relaxed, rules: {line-length: disable}}" .
+
+      - name: Helm template renders
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm template kps prometheus-community/kube-prometheus-stack -f helm/values.yaml > /dev/null

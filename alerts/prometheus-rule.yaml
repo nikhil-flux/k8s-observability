@@ -1,0 +1,87 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: demo-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: observability-platform
+spec:
+  groups:
+    - name: demo-app
+      rules:
+        - alert: DemoAppDown
+          expr: sum(up{job="demo-app"}) == 0 or absent(up{job="demo-app"})
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "demo-app has no healthy targets"
+            description: "Prometheus cannot scrape any demo-app pod for 1 minute."
+
+        - alert: DemoAppHighErrorRate
+          # The example app returns 404 on /err, so 4xx counts as errors here.
+          expr: |
+            sum(rate(http_requests_total{job="demo-app",code=~"4..|5.."}[5m]))
+              /
+            sum(rate(http_requests_total{job="demo-app"}[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "demo-app error ratio above 5%"
+            description: "{{ $value | humanizePercentage }} of requests failed over the last 5 minutes."
+
+        - alert: DemoAppHighLatencyP95
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(http_request_duration_seconds_bucket{job="demo-app"}[5m]))
+            ) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "demo-app p95 latency above 500ms"
+            description: "p95 latency is {{ $value | humanizeDuration }}."
+
+    - name: kubernetes
+      rules:
+        - alert: PodCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} is crash looping"
+            description: "Container {{ $labels.container }} restarted more than 3 times in 15 minutes."
+
+        - alert: PodNotReady
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_phase{phase=~"Pending|Unknown|Failed"}
+            ) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} not ready"
+            description: "Pod has been Pending, Unknown or Failed for 10 minutes."
+
+        - alert: NodeHighCPU
+          expr: |
+            100 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100 > 85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High CPU on {{ $labels.instance }}"
+            description: "CPU usage has been above 85% for 10 minutes ({{ $value | printf \"%.0f\" }}%)."
+
+        - alert: NodeHighMemory
+          expr: |
+            (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 90
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High memory on {{ $labels.instance }}"
+            description: "Memory usage has been above 90% for 10 minutes."

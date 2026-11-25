@@ -1,0 +1,49 @@
+# promtool unit tests. CI/Makefile extract .spec of alerts/prometheus-rule.yaml
+# into tests/rules.yaml before running `promtool test rules`.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: DemoAppDown fires when target is down
+    interval: 1m
+    input_series:
+      - series: 'up{job="demo-app", instance="10.0.0.1:8080"}'
+        values: "0+0x5"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: DemoAppDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "demo-app has no healthy targets"
+              description: "Prometheus cannot scrape any demo-app pod for 1 minute."
+
+  - name: DemoAppDown stays quiet when target is up
+    interval: 1m
+    input_series:
+      - series: 'up{job="demo-app", instance="10.0.0.1:8080"}'
+        values: "1+0x5"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: DemoAppDown
+        exp_alerts: []
+
+  - name: DemoAppHighErrorRate fires above 5 percent
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="demo-app", code="200"}'
+        values: "0+90x15"
+      - series: 'http_requests_total{job="demo-app", code="404"}'
+        values: "0+10x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: DemoAppHighErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "demo-app error ratio above 5%"
+              description: "10% of requests failed over the last 5 minutes."
